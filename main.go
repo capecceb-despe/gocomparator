@@ -16,7 +16,11 @@ import (
 
 var count uint64
 var countDiff uint64
-var countDiffModel uint64
+var count10 uint64
+var count20 uint64
+var count30 uint64
+var count85 uint64
+var maxDuration time.Duration
 
 func main() {
 	file := flag.String("f", "", "file to process")
@@ -34,8 +38,8 @@ func main() {
 	}
 
 	//define max number of thread in 1000
-	if *th > 1000 {
-		*th = 1000
+	if *th > 10 {
+		*th = 10
 	}
 
 	//star bar
@@ -65,8 +69,13 @@ func main() {
 	wg.Wait()
 	uiprogress.Stop()
 	fmt.Printf("Cantidad de request %d\n", count)
-	fmt.Printf("Cantidad de request diferentes modelos %d\n", countDiffModel)
 	fmt.Printf("Cantidad de request diferentes %d\n", countDiff)
+	fmt.Printf("Cantidad de request > 10ms %d\n", count10)
+	fmt.Printf("Cantidad de request > 20ms %d\n", count20)
+	fmt.Printf("Cantidad de request > 30ms %d\n", count30)
+	fmt.Printf("Cantidad de request > 85ms %d\n", count85)
+	fmt.Printf("Max duration %d\n", int64(maxDuration/time.Millisecond))
+
 }
 
 func usage() {
@@ -87,62 +96,33 @@ func worker(id *int64, wg *sync.WaitGroup, url string, host1 string, host2 strin
 	restClient1 := NewRestClient(xclient, token1)
 	restClient2 := NewRestClient(xclient, token2)
 
+	var startTime = time.Now()
 	bodyServ1, _ := restClient1.get(fmt.Sprintf("%s%s", host1, url))
+	var duration = time.Since(startTime)
+
 	bodyServ2, _ := restClient2.get(fmt.Sprintf("%s%s", host2, url))
-	if !areEqualJSONEsp(bodyServ1, bodyServ2) {
-		fmt.Printf("response are diferent with url %s\n\n", url)
-		// fmt.Printf("response 1 %s\n", bodyServ1)
-		// fmt.Printf("response 2 %s\n\n", bodyServ2)
+
+	if duration > maxDuration {
+		maxDuration = duration
+	}
+	dur := int64(duration / time.Millisecond)
+	if dur > 85 {
+		atomic.AddUint64(&count85, 1)
+		//fmt.Printf("%d %s%s %v\n\n", dur, host1, url, bodyServ1)
+	} else if dur > 30 {
+		atomic.AddUint64(&count30, 1)
+	} else if dur > 20 {
+		atomic.AddUint64(&count20, 1)
+	} else if dur > 10 {
+		atomic.AddUint64(&count10, 1)
+	}
+
+	if !areEqualJSON(bodyServ1, bodyServ2) {
+		fmt.Printf("1 %s %v\n\n", url, bodyServ1)
+		fmt.Printf("2 %s %v\n\n", url, bodyServ2)
 		atomic.AddUint64(&countDiff, 1)
 	}
 	atomic.AddUint64(&count, 1)
-}
-
-func areEqualJSONEsp(s1 string, s2 string) bool {
-	var o1 interface{}
-	var o2 interface{}
-	var err error
-	err = json.Unmarshal([]byte(s1), &o1)
-	if err != nil {
-		return false //, fmt.Errorf("Error mashalling string 1 :: %s", err.Error())
-	}
-	err = json.Unmarshal([]byte(s2), &o2)
-	if err != nil {
-		return false //, fmt.Errorf("Error mashalling string 2 :: %s", err.Error())
-	}
-
-	mapO1 := o1.(map[string]interface{})
-	mapO2 := o2.(map[string]interface{})
-
-	if _, ok := mapO1["income"]; !ok {
-		return false
-	}
-
-	if _, ok := mapO2["income"]; !ok {
-		return false
-	}
-
-	if mapO1["income"] != mapO2["income"] || mapO1["income_accuracy"] != mapO2["income_accuracy"] {
-		//ver debug info
-		debugData1 := mapO1["debug_data"]
-		mapDebugData1 := debugData1.(map[string]interface{})
-
-		debugData2 := mapO2["debug_data"]
-		mapDebugData2 := debugData2.(map[string]interface{})
-
-		if mapDebugData2["segment_model"] != mapDebugData1["segment_model"] {
-			atomic.AddUint64(&countDiffModel, 1)
-			return true
-		}
-		return false
-	}
-
-	if mapO1["travel_frequency"] != mapO2["travel_frequency"] || mapO1["travel_frequency_accuracy"] != mapO2["travel_frequency_accuracy"] {
-		//ver
-		return false
-	}
-
-	return true
 }
 
 func areEqualJSON(s1 string, s2 string) bool {
